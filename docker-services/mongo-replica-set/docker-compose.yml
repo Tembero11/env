@@ -1,0 +1,103 @@
+version: '3.8'
+
+services:
+  mongo1:
+    image: mongo:latest
+    container_name: mongo1
+    hostname: mongo1
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data-1:/data/db
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+
+  mongo2:
+    image: mongo:latest
+    container_name: mongo2
+    hostname: mongo2
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo-data-2:/data/db
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+
+  mongo3:
+    image: mongo:latest
+    container_name: mongo3
+    hostname: mongo3
+    ports:
+      - "27019:27017"
+    volumes:
+      - mongo-data-3:/data/db
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+
+  # SERVICE: This container will auto-initiate the replica set
+  mongo-init:
+    image: mongo:latest
+    container_name: mongo-init
+    depends_on:
+      - mongo1
+      - mongo2
+      - mongo3
+    # We override the entrypoint to run our inline script
+    entrypoint: |
+      bash -c "
+        echo '--- Waiting for all mongo nodes to be ready ---'
+        
+        # We must escape the double quotes inside the eval string for bash -c
+        until mongosh --host mongo1 --eval 'db.adminCommand(\"ping\")' &> /dev/null; do
+          echo 'mongo1 is not ready. Retrying in 2s...'; sleep 2;
+        done;
+        echo 'mongo1 is ready.'
+
+        until mongosh --host mongo2 --eval 'db.adminCommand(\"ping\")' &> /dev/null; do
+          echo 'mongo2 is not ready. Retrying in 2s...'; sleep 2;
+        done;
+        echo 'mongo2 is ready.'
+
+        until mongosh --host mongo3 --eval 'db.adminCommand(\"ping\")' &> /dev/null; do
+          echo 'mongo3 is not ready. Retrying in 2s...'; sleep 2;
+        done;
+        echo 'mongo3 is ready.'
+
+        echo '--- All nodes are ready. Checking replica set status... ---'
+
+        # Check if replica set is already initiated
+        mongosh --host mongo1 --eval 'rs.status()' &> /dev/null
+        
+        # $$? gives the exit code of the last command in this shell
+        if [ $$? -eq 0 ]; then
+          # Escape quotes for the echo command
+          echo 'Replica set \"rs0\" is already initiated.'
+        else
+          echo '--- Replica set \"rs0\" not initiated. Initiating... ---'
+          
+          # All double quotes inside the eval string must be escaped
+          mongosh --host mongo1 --eval '
+            rs.initiate({
+              _id: \"rs0\",
+              members: [
+                { _id: 0, host: \"mongo1:27017\" },
+                { _id: 1, host: \"mongo2:27017\" },
+                { _id: 2, host: \"mongo3:27017\" }
+              ]
+            })
+          '
+          
+          if [ $$? -eq 0 ]; then
+            echo '--- Successfully initiated replica set \"rs0\" ---'
+          else
+            echo '--- Failed to initiate replica set \"rs0\" ---'
+            exit 1
+          fi
+        fi
+
+        echo '--- Replica set initialization script finished. ---'
+        exit 0
+      "
+    restart: "no" # Only run once
+
+volumes:
+  mongo-data-1:
+  mongo-data-2:
+  mongo-data-3:
