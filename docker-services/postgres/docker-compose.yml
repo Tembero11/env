@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:15
+
+    container_name: postgres15_server
+
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: surveyengine
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: surveyengine
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:
